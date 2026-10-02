@@ -1,0 +1,5 @@
+date,kind,symbol,exchange,currency,quantity,price,amount,fee,tax,memo,tags,sourceTransactionId
+2026-01-05,DEPOSIT,,,USD,,,5000,0,0,첫 투자금 입금,시작,sample-2026-001
+2026-01-06,BUY,SAMPLE,MANUAL,USD,10,100,,1,0,샘플 주식 매수,장기,sample-2026-002
+2026-02-10,DIVIDEND,SAMPLE,MANUAL,USD,,,20,0,3,샘플 배당 수령,배당,sample-2026-003
+2026-03-03,SELL,SAMPLE,MANUAL,USD,2,110,,1,0,샘플 주식 일부 매도,리밸런싱,sample-2026-004

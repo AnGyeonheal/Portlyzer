@@ -1,0 +1,16 @@
+node_modules/
+Portlyzer.worktrees/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+*.log
+.local-db/
+.local-tools/
+.e2e-state/
+.DS_Store
