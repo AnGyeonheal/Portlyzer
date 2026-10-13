@@ -7,6 +7,9 @@ node_modules
 .local-db
 .local-tools
 .e2e-state
+.local-state
+.backups
+*.pbackup
 test-results
 playwright-report
 coverage

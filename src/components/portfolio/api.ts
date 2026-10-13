@@ -9,7 +9,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
+async function fetchResponse(url: string, options: RequestInit = {}): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(url, {
@@ -24,11 +24,39 @@ export async function request<T>(url: string, options: RequestInit = {}): Promis
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError("서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.", "NETWORK_ERROR");
   }
-  const body = await response.json().catch(() => null);
   if (!response.ok) {
+    const body = await response.json().catch(() => null);
     throw new ApiError(body?.error?.message || (response.status === 401 ? "로그인이 만료되었습니다. 다시 로그인해 주세요." : "요청을 처리하지 못했습니다. 다시 시도해 주세요."), body?.error?.code || String(response.status), body?.error?.details);
   }
-  return body as T;
+  return response;
+}
+
+export async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetchResponse(url, options);
+  return await response.json().catch(() => null) as T;
+}
+
+export async function downloadFile(url: string, filename: string, mimeType: string): Promise<void> {
+  const response = await fetchResponse(url);
+  if (response.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== mimeType.toLowerCase()) {
+    throw new ApiError("다운로드 응답이 올바른 파일 형식이 아닙니다. 다시 시도해 주세요.", "DOWNLOAD_FORMAT");
+  }
+  let blob: Blob;
+  try {
+    blob = await response.blob();
+  } catch {
+    throw new ApiError("파일을 끝까지 내려받지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.", "DOWNLOAD_FAILED");
+  }
+  if (!blob.size) throw new ApiError("다운로드한 파일이 비어 있습니다. 다시 시도해 주세요.", "EMPTY_DOWNLOAD");
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.click();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export function errorMessage(error: unknown) {

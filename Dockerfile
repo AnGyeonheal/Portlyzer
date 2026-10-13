@@ -12,7 +12,7 @@ FROM base AS builder
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build" \
-    BETTER_AUTH_SECRET="build-only-placeholder-not-used-at-runtime" \
+    BETTER_AUTH_SECRET="build-only-ephemeral-secret-not-used-at-runtime" \
     BETTER_AUTH_URL="http://localhost:3000" npm run build
 
 FROM builder AS migrator

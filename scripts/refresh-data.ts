@@ -1,40 +1,15 @@
 import { existsSync } from "node:fs";
-import { parseArgs } from "node:util";
 import { ZodError } from "zod";
 import { AppError } from "../src/lib/errors";
+import { refreshOptions } from "./lib/refresh-options";
 
 async function main(): Promise<void> {
   if (existsSync(".env")) process.loadEnvFile(".env");
   const { db } = await import("../src/lib/db");
   try {
-    let values: Record<string, string | undefined>;
-    try {
-      values = parseArgs({
-        options: {
-          "user-id": { type: "string" },
-          provider: { type: "string" },
-          from: { type: "string" },
-          to: { type: "string" },
-          "asset-id": { type: "string" },
-        },
-        strict: true,
-        allowPositionals: false,
-      }).values;
-    } catch {
-      throw new AppError(422, "CLI_ARGUMENTS", "Use --user-id, --provider, --from, --to and optionally --asset-id.");
-    }
-    const userId = values["user-id"] ?? process.env.REFRESH_USER_ID;
-    if (!userId?.trim()) {
-      throw new AppError(422, "CLI_USER_REQUIRED", "An explicit --user-id or REFRESH_USER_ID is required; bulk refresh is never implied.");
-    }
+    const { userId, request } = refreshOptions(process.argv.slice(2));
     const { refreshMarketData } = await import("../src/lib/services/market");
-    const job = await refreshMarketData(userId, {
-      provider: values.provider ?? process.env.REFRESH_PROVIDER ?? "FRANKFURTER",
-      from: values.from ?? process.env.REFRESH_FROM,
-      to: values.to ?? process.env.REFRESH_TO,
-      ...((values["asset-id"] ?? process.env.REFRESH_ASSET_ID)
-        ? { assetId: values["asset-id"] ?? process.env.REFRESH_ASSET_ID } : {}),
-    });
+    const job = await refreshMarketData(userId, request);
     console.log(JSON.stringify(job));
     if (job.status === "RUNNING") process.exitCode = 2;
   } catch (error) {

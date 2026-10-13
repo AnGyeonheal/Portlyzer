@@ -119,9 +119,16 @@ Run from the project root (loads `.env` if present):
 ```powershell
 npm run data:refresh -- --user-id USER_ID --provider FRANKFURTER --from 2024-01-02 --to 2024-01-05
 npm run data:refresh -- --user-id USER_ID --provider ALPHA_VANTAGE --asset-id ASSET_ID --from 2024-01-02 --to 2024-01-05
+npm run data:refresh -- --user-id USER_ID --provider FRANKFURTER --days 7
 ```
 
-Environment alternatives: `REFRESH_USER_ID`, `REFRESH_PROVIDER`, `REFRESH_FROM`, `REFRESH_TO`, `REFRESH_ASSET_ID`. An explicit user is mandatory; the script never iterates all users or guesses an account. Output is safe job JSON. Exit codes: `0` completed/cached success, `1` validation/provider/database failure, `2` the matching job is already running. Schedulers must supply their chosen user/range explicitly. Schedule according to daily-data semantics and licensing, not assumed real-time updates.
+Environment alternatives: `REFRESH_USER_ID`, `REFRESH_PROVIDER`, `REFRESH_FROM`, `REFRESH_TO`, `REFRESH_ASSET_ID`, `REFRESH_DAYS`.
+`--days` selects 1-365 inclusive UTC calendar days ending today, suitable for a daily scheduled task.
+It cannot be combined with fixed `from`/`to` arguments or environment values.
+An explicit user is mandatory; the script never iterates all users or guesses an account. Output is safe job JSON.
+Exit codes: `0` completed/cached success, `1` validation/provider/database failure, `2` the matching job is already running.
+Schedulers must supply their chosen user/range explicitly, use the repository as their working directory and monitor nonzero exit codes.
+Schedule according to daily-data semantics and licensing, not assumed real-time updates. No OS task is registered automatically.
 
 ## Validation
 

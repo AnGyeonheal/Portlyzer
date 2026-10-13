@@ -39,6 +39,8 @@ test("signup, corrected import, analytics replay, isolation, export and persiste
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
+  await page.goto("/reset-password");
+  await expect(page.getByText("이 환경에서는 이메일 복구가 설정되지 않았습니다. 관리자에게 문의해 주세요.", { exact: true })).toBeVisible();
   await page.goto("/login");
   await page.getByRole("button", { name: "회원가입", exact: true }).click();
   await page.getByLabel("이름", { exact: false }).fill("검증 투자자");
@@ -58,6 +60,7 @@ test("signup, corrected import, analytics replay, isolation, export and persiste
 
   await navigate(page, "거래 내역");
   await page.getByRole("button", { name: "파일 가져오기", exact: true }).click();
+  await page.getByRole("button", { name: "일반 CSV·XLSX", exact: true }).click();
   await page.getByLabel("거래 파일", { exact: false }).setInputFiles({ name: "transactions.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
   await page.getByRole("button", { name: "업로드하고 계속", exact: true }).click();
   await page.getByRole("button", { name: "거래 검증하기", exact: true }).click();
@@ -90,6 +93,7 @@ test("signup, corrected import, analytics replay, isolation, export and persiste
 
   await navigate(page, "거래 내역");
   await page.getByRole("button", { name: "파일 가져오기", exact: true }).click();
+  await page.getByRole("button", { name: "일반 CSV·XLSX", exact: true }).click();
   await page.getByLabel("거래 파일", { exact: false }).setInputFiles({ name: "transactions.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
   await page.getByRole("button", { name: "업로드하고 계속", exact: true }).click();
   await expect(page.getByText("동일 파일 발견", { exact: true })).toBeVisible();
@@ -196,6 +200,8 @@ test("isolated demo renders complete desktop and mobile analytics", async ({ pag
   expect(data.user.isDemo).toBe(true);
   expect(data.assets.length).toBeGreaterThanOrEqual(4);
   expect(data.analysis.summary.totalValue).not.toBeNull();
+  expect(data.analysis.issues.filter((issue) => issue.severity === "error").length).toBe(0);
+  expect(data.analysis.benchmark?.returnRate).not.toBeNull();
   for (const name of ["보유 자산", "수익률 분석", "자산 배분", "배당 관리", "매매 분석", "목표 관리", "설정", "대시보드"]) await navigate(page, name);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);

@@ -13,4 +13,7 @@ test-results/
 .local-db/
 .local-tools/
 .e2e-state/
+.local-state/
+.backups/
+*.pbackup
 .DS_Store

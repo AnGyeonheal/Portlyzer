@@ -5,7 +5,8 @@ import Decimal from "decimal.js";
 import { fromBuffer, type Entry, type ZipFile } from "yauzl";
 import { z } from "zod";
 import { Prisma, type ImportJob } from "@prisma/client";
-import { importFields, type ImportMapping, type ImportPreviewRow, type ImportUploadResult, type ImportValidationResult } from "../contracts";
+import { IMPORT_FILE_LIMITS, importFields, type ImportMapping, type ImportPreviewRow, type ImportUploadResult, type ImportValidationResult } from "../contracts";
+import { IMPORT_TEMPLATE, matchesTemplateHeaders, templateListLiterals } from "../import-template";
 import type { AssetInput, TransactionKind } from "../domain";
 import { AppError } from "../errors";
 import { dateString, transactionToDto } from "../serialization";
@@ -13,7 +14,7 @@ import { currencySchema, dateSchema, decimalSchema, idSchema, revisionSchema, tr
 import { createLedgerBatch, loadLedgerState, planLedgerBatch, withUserLedgerLock, type LedgerCreation, type LedgerState, type NewLedgerAsset } from "./ledger";
 
 export const IMPORT_LIMITS = Object.freeze({
-  bytes: 2 * 1024 * 1024, rows: 2000, columns: 40, headerLength: 128, cellLength: 4096,
+  ...IMPORT_FILE_LIMITS,
   zipEntries: 256, zipEntryBytes: 8 * 1024 * 1024, zipExpandedBytes: 16 * 1024 * 1024,
 });
 const D = Decimal.clone({ precision: 80 });
@@ -142,11 +143,31 @@ function zipContents(zip: ZipFile, entry: Entry): Promise<Buffer> {
   });
 }
 
+function xmlAttributes(source: string): Map<string, string> {
+  const attributes = new Map<string, string>();
+  for (const match of source.matchAll(/(?:^|\s)([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    if (attributes.has(match[1])) throw invalidFile("XLSX 입력 검사에 중복된 XML 속성이 있습니다.");
+    attributes.set(match[1], match[2] ?? match[3]);
+  }
+  return attributes;
+}
+
 function inspectXml(xml: string, name: string): void {
   if (/<!DOCTYPE|<!ENTITY|<\?xml[^>]*encoding\s*=\s*["'](?!utf-8["']|UTF-8["'])/i.test(xml)) {
     throw invalidFile("외부 엔터티 또는 UTF-8 이외의 XLSX XML은 사용할 수 없습니다.");
   }
-  if (/<(?:[\w.-]+:)?(?:f|formula|formula1|formula2|definedName|externalReference|ddeLink|oleObject)\b|TargetMode\s*=\s*["']External["']|macroEnabled|vbaProject/i.test(xml)) {
+  // Allow only the template's fixed dropdowns and literal cell-length limit, never executable expressions.
+  const formulaCheckedXml = xml.replace(
+    /(<(?:[\w.-]+:)?dataValidation\b[^<>]*>\s*)<(?:[\w.-]+:)?formula1>([^<>]*)<\/(?:[\w.-]+:)?formula1\s*>(\s*<\/(?:[\w.-]+:)?dataValidation\s*>)/g,
+    (block: string, opening: string, value: string, closing: string) => {
+      const attributes = xmlAttributes(opening);
+      const literal = value.trim().replaceAll("&quot;", '"');
+      const allowed = attributes.get("type") === "list" ? templateListLiterals.some((item) => item === literal)
+        : attributes.get("type") === "textLength" && attributes.get("operator") === "lessThanOrEqual" && literal === String(IMPORT_FILE_LIMITS.cellLength);
+      return allowed ? opening + closing : block;
+    },
+  );
+  if (/<(?:[\w.-]+:)?(?:f|formula|formula1|formula2|definedName|externalReference|ddeLink|oleObject)\b|TargetMode\s*=\s*["']External["']|macroEnabled|vbaProject/i.test(formulaCheckedXml)) {
     throw invalidFile("수식, 이름 정의, 매크로 또는 외부 참조를 포함한 XLSX는 사용할 수 없습니다.");
   }
   if (name === "xl/workbook.xml") {
@@ -161,6 +182,28 @@ function inspectXml(xml: string, name: string): void {
     const match = /^([A-Z]{1,3})([1-9]\d{0,6})$/.exec(address);
     return match && columnNumber(match[1]) <= IMPORT_LIMITS.columns && Number(match[2]) <= IMPORT_LIMITS.rows + 1;
   };
+  let validationCells = 0;
+  for (const validation of xml.matchAll(/<(?:[\w.-]+:)?dataValidation\b([^<>]*)>/g)) {
+    const reference = xmlAttributes(validation[1]).get("sqref");
+    if (!reference?.trim()) throw invalidFile("XLSX 입력 검사에 유효한 셀 범위가 필요합니다.");
+    for (const range of reference.trim().split(/\s+/)) {
+      const addresses = range.split(":");
+      if (addresses.length > 2 || addresses.some((address) => !boundedAddress(address))) {
+        throw invalidFile("XLSX 입력 검사 범위가 2,000행·40열 한도를 초과합니다.");
+      }
+      const position = (address: string) => {
+        const [, letters, row] = /^([A-Z]+)(\d+)$/.exec(address)!;
+        return { column: columnNumber(letters), row: Number(row) };
+      };
+      const from = position(addresses[0]);
+      const to = position(addresses.at(-1)!);
+      if (from.column > to.column || from.row > to.row) throw invalidFile("XLSX 입력 검사 범위의 순서가 올바르지 않습니다.");
+      validationCells += (to.column - from.column + 1) * (to.row - from.row + 1);
+      if (validationCells > IMPORT_LIMITS.columns * (IMPORT_LIMITS.rows + 1)) {
+        throw invalidFile("XLSX 입력 검사의 전체 셀 수가 한도를 초과합니다.");
+      }
+    }
+  }
   const dimension = /<(?:[\w.-]+:)?dimension\b[^>]*\bref\s*=\s*["']([^"']+)["']/.exec(xml)?.[1];
   if (dimension && dimension.split(":").some((address) => !boundedAddress(address))) throw invalidFile("XLSX 시트 범위가 2,000행·40열 한도를 초과합니다.");
   if (/<(?:[\w.-]+:)?(?:mergeCell|sheetProtection)\b/.test(xml)) throw invalidFile("병합 또는 보호된 셀은 지원하지 않습니다.");
@@ -235,6 +278,7 @@ async function xlsxRows(bytes: Uint8Array): Promise<Pick<ParsedImport, "headers"
     }
     matrix.push(values);
   }
+  while (matrix.length > 1 && matrix[matrix.length - 1].every((value) => value === "")) matrix.pop();
   return tabularRows(matrix);
 }
 
@@ -489,9 +533,12 @@ function uploadResult(job: ImportJob, duplicateFile: boolean): ImportUploadResul
   return { jobId: job.id, filename: job.filename, headers: jobHeaders(job), rows: jobRows(job), status: job.status, duplicateFile, revision: job.revision };
 }
 
-export async function uploadImport(userId: string, accountId: string, filename: string, bytes: Uint8Array): Promise<ImportUploadResult> {
+export async function uploadImport(userId: string, accountId: string, filename: string, bytes: Uint8Array, templateId?: unknown): Promise<ImportUploadResult> {
   idSchema.parse(accountId);
   const parsed = await parseImportFile(filename, bytes);
+  if (templateId !== undefined && (templateId !== IMPORT_TEMPLATE.id || parsed.format !== "XLSX" || !matchesTemplateHeaders(parsed.headers))) {
+    throw new AppError(422, "IMPORT_TEMPLATE_MISMATCH", "표준 엑셀 양식의 열 이름과 순서를 유지해 주세요. 최신 양식을 내려받거나 일반 CSV·XLSX 방식을 선택하세요.");
+  }
   const fileHash = hash(bytes);
   return withUserLedgerLock(userId, async (tx) => {
     const account = await tx.brokerAccount.findFirst({ where: { id: accountId, userId }, select: { id: true } });

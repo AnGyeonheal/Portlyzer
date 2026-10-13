@@ -1,13 +1,53 @@
 import Decimal from "decimal.js";
+import type { Asset, Prisma } from "@prisma/client";
 import { db } from "../db";
 import { AppError } from "../errors";
-import { dateOf, shiftDay, today } from "../input";
+import { dateOf, dayOf, shiftDay, today } from "../input";
 import { createTransaction } from "./ledger";
+
+const demoPrices = [
+  { symbol: "005930", exchange: "KRX", base: "70000" },
+  { symbol: "AAPL", exchange: "NASDAQ", base: "190" },
+  { symbol: "VOO", exchange: "NYSE", base: "500" },
+  { symbol: "BTC", exchange: "CUSTOM", base: "50000" },
+];
+
+async function fillDemoMarketData(tx: Prisma.TransactionClient, userId: string, assets: Asset[], start: string, end: string) {
+  const from = [shiftDay(end, -366), shiftDay(start, -1)].sort()[0];
+  const prices: Prisma.PriceCreateManyInput[] = [];
+  const rates: Prisma.FxRateCreateManyInput[] = [];
+  for (let day = from; day <= end; day = shiftDay(day, 1)) {
+    const index = (Date.parse(day) - Date.parse(start)) / 86_400_000;
+    const date = dateOf(day);
+    for (const asset of assets) {
+      const recipe = demoPrices.find((item) => item.symbol === asset.symbol && item.exchange === asset.exchange);
+      if (!recipe) continue;
+      const growthRate = new Decimal(index).div(1200);
+      const fluctuation = new Decimal((index * 7) % 23 - 11).div(1000);
+      prices.push({
+        userId, assetId: asset.id, date, currency: asset.currency,
+        close: new Decimal(recipe.base).mul(new Decimal(1).plus(growthRate).plus(fluctuation)).toFixed(8),
+        source: "DEMO", adjustment: "RAW",
+      });
+    }
+    rates.push({ userId, date, base: "USD", quote: "KRW", rate: new Decimal(1320).plus(index % 21).toString(), source: "DEMO" });
+  }
+  const priceResult = await tx.price.createMany({ data: prices, skipDuplicates: true });
+  const fxResult = await tx.fxRate.createMany({ data: rates, skipDuplicates: true });
+  if (priceResult.count || fxResult.count) {
+    await tx.user.update({ where: { id: userId }, data: { ledgerVersion: { increment: 1 } } });
+  }
+}
 
 export async function seedDemoUser(userId: string) {
   const user = await db.user.findUnique({ where: { id: userId } });
   if (!user?.isDemo) throw new AppError(403, "DEMO_ISOLATION", "데모 데이터는 별도 데모 사용자에게만 생성할 수 있습니다.");
-  if (await db.transaction.count({ where: { userId } })) return { alreadySeeded: true };
+  const first = await db.transaction.findFirst({ where: { userId }, orderBy: { date: "asc" }, select: { date: true } });
+  if (first) {
+    const assets = await db.asset.findMany({ where: { userId, prices: { some: { source: "DEMO" } } } });
+    await db.$transaction((tx) => fillDemoMarketData(tx, userId, assets, dayOf(first.date), today()));
+    return { alreadySeeded: true };
+  }
   if (await db.brokerAccount.count({ where: { userId } })) throw new AppError(409, "DEMO_INCOMPLETE", "초기화가 완료되지 않은 데모입니다. 새 데모 세션을 사용하세요.");
   const end = today();
   const start = shiftDay(end, -180);
@@ -20,24 +60,7 @@ export async function seedDemoUser(userId: string) {
     const apple = await tx.asset.create({ data: { userId, symbol: "AAPL", name: "Apple", exchange: "NASDAQ", currency: "USD", assetClass: "STOCK", country: "미국", sector: "기술", provider: "MANUAL" } });
     const voo = await tx.asset.create({ data: { userId, symbol: "VOO", name: "Vanguard S&P 500 ETF", exchange: "NYSE", currency: "USD", assetClass: "ETF", country: "미국", sector: "시장 지수", provider: "MANUAL" } });
     const bitcoin = await tx.asset.create({ data: { userId, symbol: "BTC", name: "Bitcoin", exchange: "CUSTOM", currency: "USD", assetClass: "CRYPTO", provider: "MANUAL" } });
-    const assets = [{ asset: samsung, base: "70000" }, { asset: apple, base: "190" }, { asset: voo, base: "500" }, { asset: bitcoin, base: "50000" }];
-    const prices = [];
-    const rates = [];
-    for (let index = 0; index <= 180; index++) {
-      const date = dateOf(shiftDay(start, index));
-      for (const { asset, base } of assets) {
-        const growthRate = new Decimal(index).div(1200);
-        const fluctuation = new Decimal((index * 7) % 23 - 11).div(1000);
-        prices.push({
-          userId, assetId: asset.id, date, currency: asset.currency,
-          close: new Decimal(base).mul(new Decimal(1).plus(growthRate).plus(fluctuation)).toFixed(8),
-          source: "DEMO", adjustment: "RAW",
-        });
-      }
-      rates.push({ userId, date, base: "USD" as const, quote: "KRW" as const, rate: new Decimal(1320).plus(index % 21).toString(), source: "DEMO" });
-    }
-    await tx.price.createMany({ data: prices });
-    await tx.fxRate.createMany({ data: rates });
+    await fillDemoMarketData(tx, userId, [samsung, apple, voo, bitcoin], start, end);
     await tx.user.update({ where: { id: userId }, data: { benchmarkAssetId: voo.id, ledgerVersion: { increment: 1 } } });
     await tx.investmentGoal.createMany({ data: [
       { userId, name: "첫 1억 만들기", kind: "ASSET", target: "100000000", currency: "KRW", initial: "40000000", monthlyContribution: "1000000", annualReturn: "0.06", years: 5 },

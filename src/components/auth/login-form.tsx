@@ -9,21 +9,17 @@ import { Field, Input } from "@/components/ui/input";
 import { ErrorNotice } from "@/components/ui/feedback";
 import { Brand } from "@/components/portfolio/shared";
 import { errorMessage, request } from "@/components/portfolio/api";
+import { assertAuthResult } from "./auth-errors";
 
-const authErrors: Record<string, string> = {
-  INVALID_EMAIL_OR_PASSWORD: "이메일 또는 비밀번호가 올바르지 않습니다.",
-  USER_ALREADY_EXISTS: "이미 가입된 이메일입니다. 로그인해 주세요.",
-  USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "이미 가입된 이메일입니다. 로그인해 주세요.",
-  PASSWORD_TOO_SHORT: "비밀번호는 12자 이상으로 입력해 주세요.",
-  TOO_MANY_REQUESTS: "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
-};
-
-export function LoginForm() {
+export function LoginForm({ demoEnabled, recoveryEnabled, requireEmailVerification, verified, verificationError }: {
+  demoEnabled: boolean; recoveryEnabled: boolean; requireEmailVerification: boolean; verified: boolean; verificationError: boolean;
+}) {
   const router = useRouter();
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<"login" | "signup" | "reset-request">("login");
   const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState<"auth" | "demo" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(verificationError ? "인증 링크가 유효하지 않거나 만료되었습니다. 다시 로그인해 새 인증 메일을 요청하세요." : null);
+  const [message, setMessage] = useState<string | null>(verified && !verificationError ? "이메일 인증이 완료되었습니다. 로그인해 주세요." : null);
 
   function finish() {
     router.replace("/");
@@ -35,13 +31,23 @@ export function LoginForm() {
     const values = new FormData(event.currentTarget);
     setPending("auth");
     setError(null);
+    setMessage(null);
     try {
       const credentials = { email: String(values.get("email")).trim(), password: String(values.get("password")) };
+      if (mode === "reset-request") {
+        assertAuthResult(await authClient.requestPasswordReset({ email: credentials.email, redirectTo: "/reset-password" }));
+        setMessage("등록된 이메일이라면 비밀번호 재설정 안내가 발송됩니다. 메일함과 스팸함을 확인해 주세요.");
+        setPending(null);
+        return;
+      }
       const result = mode === "signup"
-        ? await authClient.signUp.email({ ...credentials, name: String(values.get("name")).trim() })
+        ? await authClient.signUp.email({ ...credentials, name: String(values.get("name")).trim(), callbackURL: "/login?verified=1" })
         : await authClient.signIn.email(credentials);
-      if (result.error) {
-        throw new Error(authErrors[result.error.code || ""] || (result.error.status === 429 ? authErrors.TOO_MANY_REQUESTS : "인증 요청을 완료하지 못했습니다. 입력 정보를 확인하고 다시 시도해 주세요."));
+      assertAuthResult(result);
+      if (mode === "signup" && requireEmailVerification) {
+        setMessage("메일함에서 이메일 인증을 완료한 뒤 로그인해 주세요.");
+        setPending(null);
+        return;
       }
       finish();
     } catch (cause) {
@@ -88,24 +94,26 @@ export function LoginForm() {
         <div className="login-mobile-brand"><Brand /></div>
         <div className="login-form-wrap">
           <div className="login-welcome-icon"><ChartNoAxesCombined size={25} /></div>
-          <h2>{mode === "login" ? "다시 만나 반가워요" : "나만의 투자 기록을 시작하세요"}</h2>
-          <p className="login-description">{mode === "login" ? "오늘의 포트폴리오를 확인해 볼까요?" : "계좌를 연결하지 않아도 기록을 직접 관리할 수 있어요."}</p>
+          <h2>{mode === "reset-request" ? "비밀번호를 잊으셨나요?" : mode === "login" ? "다시 만나 반가워요" : "나만의 투자 기록을 시작하세요"}</h2>
+          <p className="login-description">{mode === "reset-request" ? "가입한 이메일로 재설정 링크를 보내드립니다." : mode === "login" ? "오늘의 포트폴리오를 확인해 볼까요?" : "계좌를 연결하지 않아도 기록을 직접 관리할 수 있어요."}</p>
           <div className="auth-tabs" role="group" aria-label="인증 방식">
-            <button type="button" aria-pressed={mode === "login"} disabled={!!pending} onClick={() => { setMode("login"); setError(null); }}>로그인</button>
-            <button type="button" aria-pressed={mode === "signup"} disabled={!!pending} onClick={() => { setMode("signup"); setError(null); }}>회원가입</button>
+            <button type="button" aria-pressed={mode === "login"} disabled={!!pending} onClick={() => { setMode("login"); setError(null); setMessage(null); }}>로그인</button>
+            <button type="button" aria-pressed={mode === "signup"} disabled={!!pending} onClick={() => { setMode("signup"); setError(null); setMessage(null); }}>회원가입</button>
           </div>
           <form onSubmit={submit} className="form-stack">
             {mode === "signup" && <Field label="이름" required><Input name="name" autoComplete="name" placeholder="어떻게 불러드릴까요?" required maxLength={80} disabled={!!pending} /></Field>}
             <Field label="이메일" required><Input name="email" type="email" autoComplete="email" placeholder="you@example.com" required maxLength={254} disabled={!!pending} /></Field>
-            <Field label="비밀번호" htmlFor="login-password" required hint={mode === "signup" ? "안전한 비밀번호를 12자 이상 입력해 주세요." : undefined}>
+            {mode !== "reset-request" && <Field label="비밀번호" htmlFor="login-password" required hint={mode === "signup" ? "안전한 비밀번호를 12자 이상 입력해 주세요." : undefined}>
               <span className="password-field"><Input id="login-password" name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "signup" ? "new-password" : "current-password"} aria-describedby={mode === "signup" ? "login-password-hint" : undefined} placeholder={mode === "signup" ? "12자 이상 입력" : "비밀번호를 입력하세요"} required minLength={mode === "signup" ? 12 : undefined} maxLength={128} disabled={!!pending} /><button type="button" aria-label={showPassword ? "비밀번호 숨기기" : "비밀번호 보기"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></span>
-            </Field>
+            </Field>}
             <ErrorNotice message={error} />
-            <Button type="submit" size="lg" className="w-full" disabled={!!pending}>{pending === "auth" ? <LoaderCircle className="animate-spin" /> : null}{mode === "login" ? "로그인하기" : "계정 만들기"}<ArrowRight /></Button>
+            {message && <p className="notice notice-info" role="status">{message}</p>}
+            <Button type="submit" size="lg" className="w-full" disabled={!!pending}>{pending === "auth" ? <LoaderCircle className="animate-spin" /> : null}{mode === "reset-request" ? "재설정 메일 보내기" : mode === "login" ? "로그인하기" : "계정 만들기"}<ArrowRight /></Button>
           </form>
-          <div className="login-divider"><span>먼저 경험해 보고 싶다면</span></div>
+          {recoveryEnabled && mode === "login" && <Button variant="ghost" disabled={!!pending} onClick={() => { setMode("reset-request"); setError(null); setMessage(null); }}>비밀번호를 잊으셨나요?</Button>}
+          {demoEnabled && <><div className="login-divider"><span>먼저 경험해 보고 싶다면</span></div>
           <Button variant="outline" size="lg" className="demo-button w-full" disabled={!!pending} onClick={demo}>{pending === "demo" ? <LoaderCircle className="animate-spin" /> : <Sparkles />}가입 없이 데모 둘러보기<ArrowRight /></Button>
-          <p className="demo-note"><span className="badge badge-demo">DEMO</span> 독립된 가상 데이터로 모든 기능을 둘러보세요.<br />실제 계좌와 연결되지 않으며 투자 성과를 보장하지 않습니다.</p>
+          <p className="demo-note"><span className="badge badge-demo">DEMO</span> 독립된 가상 데이터로 모든 기능을 둘러보세요.<br />실제 계좌와 연결되지 않으며 투자 성과를 보장하지 않습니다.</p></>}
           <div className="login-security"><LockKeyhole size={14} /><span>내 기록은 내 계정에서만 볼 수 있어요.</span></div>
         </div>
         <footer className="login-footer">© {new Date().getFullYear()} Portlyzer. 나의 투자를 한눈에.</footer>

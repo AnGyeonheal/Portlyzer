@@ -10,8 +10,8 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17.10-alpine
@@ -31,6 +31,7 @@ jobs:
       ENABLE_DEMO: "true"
       NEXT_TELEMETRY_DISABLED: "1"
       RUN_INTEGRATION: "1"
+      RUN_BACKUP_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,16 +39,38 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - run: npm audit --omit=dev --audit-level=moderate
+      - name: Select PostgreSQL 17 client tools
+        shell: bash
+        run: |
+          if [ ! -x /usr/lib/postgresql/17/bin/pg_dump ]; then
+            sudo apt-get update
+            if ! apt-cache show postgresql-client-17 > /dev/null 2>&1; then
+              sudo install -d /usr/share/postgresql-common/pgdg
+              curl --fail --silent --show-error --location https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+                | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc > /dev/null
+              echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" \
+                | sudo tee /etc/apt/sources.list.d/portlyzer-pgdg.list > /dev/null
+              sudo apt-get update
+            fi
+            sudo apt-get install -y --no-install-recommends postgresql-client-17
+          fi
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          echo "PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
       - run: npm run db:migrate
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run check:readiness
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - run: npx playwright test tests/e2e/restart.spec.ts
         env:
           RUN_RESTART_PROBE: "1"
+      - run: npm run test:e2e
+        env:
+          RUN_MAIL_E2E: "1"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -56,3 +79,27 @@ jobs:
             playwright-report
             test-results
           retention-days: 5
+
+  container-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run setup:local
+      - name: Build and start the isolated stack
+        run: docker compose -p portlyzer-ci up --build --wait --wait-timeout 180
+      - name: Verify container health and login
+        run: |
+          curl --fail --retry 5 --retry-delay 2 http://127.0.0.1:3000/api/health
+          curl --fail http://127.0.0.1:3000/login > /dev/null
+      - name: Container diagnostics
+        if: failure()
+        run: docker compose -p portlyzer-ci logs --tail=80 app migrate
+      - name: Stop only the CI stack
+        if: always()
+        run: docker compose -p portlyzer-ci down

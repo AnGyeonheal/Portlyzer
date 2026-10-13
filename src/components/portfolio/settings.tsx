@@ -11,13 +11,14 @@ import { request, useMutation } from "./api";
 import { Hint, Panel } from "./shared";
 import { useWorkspace } from "./workspace-context";
 import type { Currency } from "@/lib/domain";
+import { SecuritySettings } from "./settings-security";
 
-const tabs = [{ id: "general", label: "일반" }, { id: "accounts", label: "계좌·포트폴리오" }, { id: "assets", label: "종목 관리" }, { id: "market", label: "가격·환율" }];
+const tabs = [{ id: "general", label: "일반" }, { id: "accounts", label: "계좌·포트폴리오" }, { id: "assets", label: "종목 관리" }, { id: "market", label: "가격·환율" }, { id: "security", label: "계정·보안" }];
 
 export function Settings({ initialTab }: { initialTab?: "market" } = {}) {
   const { data } = useWorkspace();
   const [tab, setTab] = useState(initialTab ?? (data.accounts.length ? "general" : "accounts"));
-  return <div className="view-stack"><div className="settings-tabs" role="group" aria-label="설정 분류">{tabs.map((item) => <button key={item.id} aria-pressed={tab === item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</div>{tab === "general" && <GeneralSettings />}{tab === "accounts" && <AccountManagement />}{tab === "assets" && <AssetManagement />}{tab === "market" && <MarketSettings />}</div>;
+  return <div className="view-stack"><div className="settings-tabs" role="group" aria-label="설정 분류">{tabs.map((item) => <button key={item.id} aria-pressed={tab === item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</div>{tab === "general" && <GeneralSettings />}{tab === "accounts" && <AccountManagement />}{tab === "assets" && <AssetManagement />}{tab === "market" && <MarketSettings />}{tab === "security" && <SecuritySettings />}</div>;
 }
 
 function GeneralSettings() {

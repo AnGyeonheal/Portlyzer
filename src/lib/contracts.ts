@@ -124,6 +124,9 @@ export const importFields = [
   "date", "kind", "symbol", "exchange", "currency", "quantity", "price", "amount",
   "fee", "tax", "toAccountId", "toCurrency", "toAmount", "ratio", "memo", "tags", "sourceTransactionId",
 ] as const;
+export const IMPORT_FILE_LIMITS = Object.freeze({
+  bytes: 2 * 1024 * 1024, rows: 2000, columns: 40, headerLength: 128, cellLength: 4096,
+});
 export type ImportField = (typeof importFields)[number];
 export type ImportMapping = Partial<Record<ImportField, string>>;
 

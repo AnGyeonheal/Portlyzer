@@ -181,6 +181,13 @@ describe("protected XLSX parser", () => {
     '<worksheet><externalReference TargetMode="External"/></worksheet>',
     '<worksheet><conditionalFormatting><cfRule><formula>SUM(A1:A2)</formula></cfRule></conditionalFormatting></worksheet>',
     '<worksheet><dataValidations><dataValidation><formula1>SUM(A1:A2)</formula1></dataValidation></dataValidations></worksheet>',
+    '<worksheet><dataValidations><dataValidation type="list" sqref="A1:XFD1048576"><formula1>"KRW,USD"</formula1></dataValidation></dataValidations></worksheet>',
+    '<worksheet><dataValidations><dataValidation type="list" sqref="A2:A2002"><formula1>"KRW,USD"</formula1></dataValidation></dataValidations></worksheet>',
+    '<worksheet><dataValidations><dataValidation type="list" sqref="A3:A2"><formula1>"KRW,USD"</formula1></dataValidation></dataValidations></worksheet>',
+    '<worksheet><dataValidations><dataValidation type="list" sqref="A1:AN2001 A1:AN2001"><formula1>"KRW,USD"</formula1></dataValidation></dataValidations></worksheet>',
+    '<worksheet><dataValidations><dataValidation type="textLength" operator="lessThanOrEqual" sqref="A2"><formula1>SUM(A1:A2)</formula1></dataValidation></dataValidations></worksheet>',
+    '<worksheet><dataValidations><dataValidation type="list" sqref="A2" sqref="A1:XFD1048576"><formula1>"KRW,USD"</formula1></dataValidation></dataValidations></worksheet>',
+    `<worksheet><dataValidations><dataValidation type="list" prompt='sqref="A2"' sqref="A1:XFD1048576"><formula1>"KRW,USD"</formula1></dataValidation></dataValidations></worksheet>`,
   ])("rejects unsafe XML before workbook parsing", async (content) => {
     const bytes = zipFile([
       { name: "[Content_Types].xml", content: "<Types/>" },

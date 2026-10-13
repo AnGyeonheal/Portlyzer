@@ -30,7 +30,7 @@ export function Transactions() {
   const pageSize = 20;
   const currentPage = Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1));
   return <div className="view-stack">
-    <Panel className="import-invitation"><div className="import-invitation-content"><span className="feature-icon"><FileUp /></span><div><h2>투자 기록, 한 번에 가져오세요</h2><p>CSV·XLSX 파일을 직접 매핑하고, 검토한 거래만 안전하게 반영합니다.</p></div></div><Button variant="outline" onClick={() => setImporting(true)}><FileUp />파일 가져오기</Button></Panel>
+    <Panel className="import-invitation"><div className="import-invitation-content"><span className="feature-icon"><FileUp /></span><div><h2>엑셀 양식으로 거래를 한 번에</h2><p>빈 양식을 내려받아 작성한 뒤 올려 주세요. 검증·미리보기 후 확정한 거래만 반영합니다.</p></div></div><Button variant="outline" onClick={() => setImporting(true)}><FileUp />파일 가져오기</Button></Panel>
     {importing && <ImportWizard onClose={() => setImporting(false)} />}
     <Panel title="모든 거래" description={`선택한 기간·계좌의 거래 ${rows.length.toLocaleString("ko-KR")}건`} action={<Button size="sm" onClick={openTransaction}><Plus />거래 추가</Button>}>
       <div className="table-toolbar"><div className="search-field"><Search size={17} /><Input aria-label="거래 검색" placeholder="종목, 메모, 태그 검색" value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} /></div><Select aria-label="거래 유형 필터" value={kind} onChange={(event) => { setKind(event.target.value); setPage(0); }}><option value="all">모든 거래 유형</option>{Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></div>

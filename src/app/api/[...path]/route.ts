@@ -12,6 +12,8 @@ import { createTransaction, deleteTransaction, getTransactionHistory, updateTran
 import { confirmImport, uploadImport, validateImport } from "@/lib/services/imports";
 import { importManualFx, importManualPrices, refreshMarketData, upsertManualFx, upsertManualPrice } from "@/lib/services/market";
 import { seedDemoUser } from "@/lib/services/demo";
+import { createImportTemplate } from "@/lib/services/import-template";
+import { IMPORT_TEMPLATE } from "@/lib/import-template";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,6 +82,15 @@ async function handler(request: Request, context: Context): Promise<Response> {
     const user = await requireUser(request);
     await rateLimit(user.id, method === "GET" ? "read" : "write", method === "GET" ? 180 : 60);
     if (method === "GET") {
+      if (resource === "imports" && id === "template" && !action) {
+        await rateLimit(user.id, "template-download", 10);
+        const bytes = await createImportTemplate();
+        return new Response(bytes.buffer, { headers: {
+          "Content-Type": IMPORT_TEMPLATE.mimeType,
+          "Content-Disposition": `attachment; filename="${IMPORT_TEMPLATE.filename}"`,
+          "Cache-Control": "no-store",
+        } });
+      }
       if (resource === "workspace" && path.length === 1) return json(await getWorkspace(user.id, Object.fromEntries(new URL(request.url).searchParams)));
       if (resource === "export" && path.length === 1) return await exportUser(user.id);
       if (resource === "transactions" && id && action === "history") return json(await getTransactionHistory(user.id, id));
@@ -101,7 +112,8 @@ async function handler(request: Request, context: Context): Promise<Response> {
       if (!(file instanceof File) || typeof accountId !== "string" || form.getAll("file").length !== 1) {
         throw new AppError(422, "UPLOAD_FIELDS", "파일 하나와 계좌를 선택하세요.");
       }
-      return json(await uploadImport(user.id, accountId, file.name, new Uint8Array(await file.arrayBuffer())), 201);
+      const templateId = form.get("templateId") ?? undefined;
+      return json(await uploadImport(user.id, accountId, file.name, new Uint8Array(await file.arrayBuffer()), templateId), 201);
     }
     if (resource === "imports" && id && action === "validate" && method === "POST") {
       const input = z.object({

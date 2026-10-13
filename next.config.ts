@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 const config: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  agentRules: false,
+  outputFileTracingExcludes: {
+    "/*": [".env", ".env.*", ".local-db/**", ".local-state/**", ".local-tools/**", ".backups/**", ".e2e-state/**", "*.pbackup"],
+  },
   serverExternalPackages: ["exceljs", "yauzl"],
   experimental: { serverActions: { bodySizeLimit: "1mb" } },
   async headers() {
